@@ -131,6 +131,7 @@
         <div>━━━━━━━━━━━━━━━━━━━━</div>
         <div id="hudSpeed">Speed: <span id="speed">0</span> m/s</div>
         <div id="hudAltitude">Altitude: <span id="altitude">0</span> m</div>
+        <div id="hudEnergy">Energy: <span id="energy" style="color: #00ffff;">0</span></div>
         <div>━━━━━━━━━━━━━━━━━━━━</div>
         <div style="font-size: 11px; margin-top: 5px;">
             WASD - Move | QE - Up/Down<br>
@@ -173,13 +174,217 @@
             chatActive: false,
             movement: { forward: false, backward: false, left: false, right: false, up: false, down: false },
             mouseMovement: { x: 0, y: 0 },
-            rotation: { x: 0, y: 0 }
+            rotation: { x: 0, y: 0 },
+            energyOrbs: [],
+            lightningBolts: [],
+            particles: [],
+            energy: 0
         };
 
         // Constants
         const EARTH_RADIUS = 6371; // km
         const PLAYER_SPEED = 50; // m/s
         const PLAYER_SPRINT_SPEED = 150; // m/s
+
+        // Energy Orb class
+        class EnergyOrb {
+            constructor(position) {
+                this.position = position.clone();
+                this.rotation = 0;
+                this.pulsePhase = Math.random() * Math.PI * 2;
+
+                // Create glowing orb
+                const geometry = new THREE.SphereGeometry(15, 16, 16);
+                const material = new THREE.MeshPhongMaterial({
+                    color: 0x00ffff,
+                    emissive: 0x00ffff,
+                    emissiveIntensity: 1.5,
+                    transparent: true,
+                    opacity: 0.8
+                });
+                this.mesh = new THREE.Mesh(geometry, material);
+                this.mesh.position.copy(this.position);
+
+                // Add particle ring
+                this.createParticleRing();
+
+                scene.add(this.mesh);
+            }
+
+            createParticleRing() {
+                const particleCount = 20;
+                const geometry = new THREE.BufferGeometry();
+                const positions = [];
+
+                for (let i = 0; i < particleCount; i++) {
+                    const angle = (i / particleCount) * Math.PI * 2;
+                    const radius = 25;
+                    positions.push(
+                        Math.cos(angle) * radius,
+                        Math.sin(angle) * 5,
+                        Math.sin(angle) * radius
+                    );
+                }
+
+                geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+                const material = new THREE.PointsMaterial({
+                    color: 0x00ffff,
+                    size: 5,
+                    transparent: true,
+                    opacity: 0.8
+                });
+
+                this.particles = new THREE.Points(geometry, material);
+                this.mesh.add(this.particles);
+            }
+
+            update(deltaTime) {
+                // Pulse effect
+                this.pulsePhase += deltaTime * 3;
+                const pulse = Math.sin(this.pulsePhase) * 0.3 + 1;
+                this.mesh.scale.setScalar(pulse);
+
+                // Rotate particles
+                this.rotation += deltaTime;
+                if (this.particles) {
+                    this.particles.rotation.y = this.rotation;
+                }
+
+                // Float up and down
+                this.mesh.position.y = this.position.y + Math.sin(this.pulsePhase * 0.5) * 10;
+            }
+
+            collect() {
+                scene.remove(this.mesh);
+            }
+        }
+
+        // Lightning Bolt class
+        class LightningBolt {
+            constructor(start, end) {
+                this.start = start.clone();
+                this.end = end.clone();
+                this.lifetime = 0.15; // seconds
+                this.age = 0;
+
+                // Create lightning geometry
+                const points = this.generateLightningPath(start, end, 5);
+                const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                const material = new THREE.LineBasicMaterial({
+                    color: 0x00ffff,
+                    linewidth: 3,
+                    transparent: true,
+                    opacity: 1
+                });
+
+                this.mesh = new THREE.Line(geometry, material);
+                scene.add(this.mesh);
+            }
+
+            generateLightningPath(start, end, segments) {
+                const points = [start.clone()];
+                const direction = end.clone().sub(start);
+
+                for (let i = 1; i < segments; i++) {
+                    const t = i / segments;
+                    const point = start.clone().add(direction.clone().multiplyScalar(t));
+
+                    // Add random offset
+                    const offset = new THREE.Vector3(
+                        (Math.random() - 0.5) * 100,
+                        (Math.random() - 0.5) * 100,
+                        (Math.random() - 0.5) * 100
+                    );
+                    point.add(offset);
+
+                    points.push(point);
+                }
+
+                points.push(end.clone());
+                return points;
+            }
+
+            update(deltaTime) {
+                this.age += deltaTime;
+
+                // Fade out
+                const fadeProgress = this.age / this.lifetime;
+                this.mesh.material.opacity = Math.max(0, 1 - fadeProgress);
+
+                return this.age < this.lifetime;
+            }
+
+            destroy() {
+                scene.remove(this.mesh);
+            }
+        }
+
+        // Particle Effect class
+        class ParticleEffect {
+            constructor(position, color = 0x00ffff, count = 30) {
+                this.position = position.clone();
+                this.lifetime = 2.0;
+                this.age = 0;
+
+                const geometry = new THREE.BufferGeometry();
+                const positions = [];
+                const velocities = [];
+
+                for (let i = 0; i < count; i++) {
+                    positions.push(
+                        position.x,
+                        position.y,
+                        position.z
+                    );
+
+                    // Random velocity
+                    velocities.push(
+                        (Math.random() - 0.5) * 100,
+                        Math.random() * 100,
+                        (Math.random() - 0.5) * 100
+                    );
+                }
+
+                geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+                this.velocities = velocities;
+
+                const material = new THREE.PointsMaterial({
+                    color: color,
+                    size: 8,
+                    transparent: true,
+                    opacity: 1.0
+                });
+
+                this.mesh = new THREE.Points(geometry, material);
+                scene.add(this.mesh);
+            }
+
+            update(deltaTime) {
+                this.age += deltaTime;
+
+                // Update particle positions
+                const positions = this.mesh.geometry.attributes.position.array;
+                for (let i = 0; i < positions.length; i += 3) {
+                    positions[i] += this.velocities[i] * deltaTime;
+                    positions[i + 1] += this.velocities[i + 1] * deltaTime;
+                    positions[i + 2] += this.velocities[i + 2] * deltaTime;
+
+                    // Gravity
+                    this.velocities[i + 1] -= 50 * deltaTime;
+                }
+                this.mesh.geometry.attributes.position.needsUpdate = true;
+
+                // Fade out
+                const fadeProgress = this.age / this.lifetime;
+                this.mesh.material.opacity = Math.max(0, 1 - fadeProgress);
+
+                return this.age < this.lifetime;
+            }
+
+            destroy() {
+                scene.remove(this.mesh);
+            }
+        }
 
         // Player class
         class Player {
@@ -195,14 +400,57 @@
                 const geometry = new THREE.ConeGeometry(5, 15, 8);
                 const material = new THREE.MeshPhongMaterial({
                     color: isAI ? 0xff00ff : 0x00ffff,
-                    emissive: isAI ? 0x660066 : 0x006666
+                    emissive: isAI ? 0x660066 : 0x006666,
+                    emissiveIntensity: 0.8
                 });
                 this.mesh = new THREE.Mesh(geometry, material);
+
+                // Energy aura
+                this.createEnergyAura();
 
                 // Name label
                 this.createNameLabel();
 
                 scene.add(this.mesh);
+            }
+
+            createEnergyAura() {
+                // Glowing sphere around player
+                const geometry = new THREE.SphereGeometry(12, 16, 16);
+                const material = new THREE.MeshBasicMaterial({
+                    color: this.isAI ? 0xff00ff : 0x00ffff,
+                    transparent: true,
+                    opacity: 0.2,
+                    side: THREE.BackSide
+                });
+                this.aura = new THREE.Mesh(geometry, material);
+                this.mesh.add(this.aura);
+
+                // Energy particles orbiting player
+                const particleCount = 15;
+                const particleGeometry = new THREE.BufferGeometry();
+                const positions = [];
+
+                for (let i = 0; i < particleCount; i++) {
+                    const theta = (i / particleCount) * Math.PI * 2;
+                    const radius = 15;
+                    positions.push(
+                        Math.cos(theta) * radius,
+                        Math.sin(theta * 3) * 10,
+                        Math.sin(theta) * radius
+                    );
+                }
+
+                particleGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+                const particleMaterial = new THREE.PointsMaterial({
+                    color: this.isAI ? 0xff00ff : 0x00ffff,
+                    size: 4,
+                    transparent: true,
+                    opacity: 0.8
+                });
+
+                this.energyParticles = new THREE.Points(particleGeometry, particleMaterial);
+                this.mesh.add(this.energyParticles);
             }
 
             createNameLabel() {
@@ -227,6 +475,18 @@
             update(deltaTime) {
                 if (this.isAI) {
                     this.updateAI(deltaTime);
+                }
+
+                // Animate energy aura
+                if (this.aura) {
+                    this.aura.rotation.y += deltaTime * 0.5;
+                    const pulse = Math.sin(Date.now() * 0.003) * 0.1 + 0.2;
+                    this.aura.material.opacity = pulse;
+                }
+
+                // Rotate energy particles
+                if (this.energyParticles) {
+                    this.energyParticles.rotation.y += deltaTime * 2;
                 }
 
                 // Update mesh position
@@ -462,6 +722,80 @@
             scene.add(ambientLight);
         }
 
+        // Spawn energy orbs around the world
+        function spawnEnergyOrbs(count = 20) {
+            for (let i = 0; i < count; i++) {
+                // Random position on Earth's surface
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(2 * Math.random() - 1);
+                const radius = EARTH_RADIUS + 50;
+
+                const position = new THREE.Vector3(
+                    radius * Math.sin(phi) * Math.cos(theta),
+                    radius * Math.sin(phi) * Math.sin(theta),
+                    radius * Math.cos(phi)
+                );
+
+                const orb = new EnergyOrb(position);
+                gameState.energyOrbs.push(orb);
+            }
+
+            addChatMessage('system', `${count} energy orbs spawned across the world`);
+        }
+
+        // Create lightning between two points
+        function createLightning(start, end) {
+            const bolt = new LightningBolt(start, end);
+            gameState.lightningBolts.push(bolt);
+        }
+
+        // Create particle explosion
+        function createParticleExplosion(position, color = 0x00ffff) {
+            const particles = new ParticleEffect(position, color, 50);
+            gameState.particles.push(particles);
+        }
+
+        // Check if player is near energy orb
+        function checkEnergyOrbCollections() {
+            if (!gameState.localPlayer) return;
+
+            const playerPos = gameState.localPlayer.position;
+
+            for (let i = gameState.energyOrbs.length - 1; i >= 0; i--) {
+                const orb = gameState.energyOrbs[i];
+                const distance = playerPos.distanceTo(orb.position);
+
+                if (distance < 50) {
+                    // Collect orb
+                    gameState.energy += 100;
+                    orb.collect();
+                    gameState.energyOrbs.splice(i, 1);
+
+                    // Create effects
+                    createParticleExplosion(orb.position);
+                    createLightning(orb.position, playerPos);
+
+                    addChatMessage('system', `+100 Energy! Total: ${gameState.energy}`);
+                }
+            }
+        }
+
+        // Random lightning storms
+        function createLightningStorm() {
+            if (Math.random() < 0.01) { // 1% chance per frame
+                // Lightning between random AI agents
+                const agents = Array.from(gameState.aiAgents.values());
+                if (agents.length >= 2) {
+                    const agent1 = agents[Math.floor(Math.random() * agents.length)];
+                    const agent2 = agents[Math.floor(Math.random() * agents.length)];
+
+                    if (agent1 !== agent2) {
+                        createLightning(agent1.position, agent2.position);
+                    }
+                }
+            }
+        }
+
         // Initialize AI agents
         function spawnAIAgents() {
             AI_PERSONALITIES.forEach((ai, index) => {
@@ -566,6 +900,9 @@
             // Calculate speed
             const speed = gameState.localPlayer.velocity.length();
             document.getElementById('speed').textContent = speed.toFixed(1);
+
+            // Energy count
+            document.getElementById('energy').textContent = gameState.energy;
         }
 
         // Input handling
@@ -656,6 +993,9 @@
             updateLoading('Spawning AI agents...');
             spawnAIAgents();
 
+            updateLoading('Generating energy orbs...');
+            spawnEnergyOrbs(30);
+
             // Create local player
             const playerName = prompt('Enter your name:', 'Explorer') || 'Explorer';
             gameState.localPlayer = new Player(Date.now(), playerName, false);
@@ -666,6 +1006,7 @@
 
             updatePlayerList();
             addChatMessage('system', `Welcome to Lucidia.Earth, ${playerName}!`);
+            addChatMessage('system', `Collect energy orbs (glowing cyan spheres) to gain power!`);
 
             document.getElementById('loading').classList.add('hidden');
 
@@ -717,6 +1058,37 @@
             gameState.aiAgents.forEach(agent => {
                 agent.update(deltaTime);
             });
+
+            // Update energy orbs
+            gameState.energyOrbs.forEach(orb => {
+                orb.update(deltaTime);
+            });
+
+            // Check energy orb collections
+            checkEnergyOrbCollections();
+
+            // Update lightning bolts
+            for (let i = gameState.lightningBolts.length - 1; i >= 0; i--) {
+                const bolt = gameState.lightningBolts[i];
+                const alive = bolt.update(deltaTime);
+                if (!alive) {
+                    bolt.destroy();
+                    gameState.lightningBolts.splice(i, 1);
+                }
+            }
+
+            // Update particle effects
+            for (let i = gameState.particles.length - 1; i >= 0; i--) {
+                const particle = gameState.particles[i];
+                const alive = particle.update(deltaTime);
+                if (!alive) {
+                    particle.destroy();
+                    gameState.particles.splice(i, 1);
+                }
+            }
+
+            // Random lightning storms
+            createLightningStorm();
 
             updateHUD();
 
