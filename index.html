@@ -557,7 +557,8 @@
         <button class="ctrl-btn" id="btnRain" title="Rain">🌧️</button>
         <button class="ctrl-btn" id="btnSnow" title="Snow">❄️</button>
         <button class="ctrl-btn" id="btnSpeed" title="Speed x3">⏩</button>
-    </div>
+        <button class="ctrl-btn" id="btnPhysics" title="Toggle Physics">⚛️</button>
+        <button class="ctrl-btn" id="btnSpawnAtoms" title="Spawn 10k Atoms">🔬</button>    </div>
 
     <!-- Notifications -->
     <div class="notifications" id="notifications"></div>
@@ -697,6 +698,188 @@
         swamp: { name: 'Swamp', icon: '🌿', color: 0x556b2f, desc: 'Murky wetlands', temp: 22 },
         tundra: { name: 'Tundra', icon: '❄️', color: 0xb0c4de, desc: 'Frozen plains', temp: -5 }
     };
+
+    // ==================== PHYSICS SIMULATION ====================
+    const PHYSICS = {
+        enabled: false,
+        particles: [],
+        G: 6.674e-11, // Gravitational constant
+        k: 8.99e9, // Coulomb constant
+        timeScale: 1e6, // Speed up time
+        particleLimit: 50000
+    };
+
+    class Atom {
+        constructor(x, y, z, element = 'H') {
+            this.position = new THREE.Vector3(x, y, z);
+            this.velocity = new THREE.Vector3(
+                (Math.random() - 0.5) * 10,
+                (Math.random() - 0.5) * 10,
+                (Math.random() - 0.5) * 10
+            );
+            this.acceleration = new THREE.Vector3();
+            this.element = element;
+
+            // Element properties
+            const elements = {
+                'H': { mass: 1.008, charge: 0, color: 0xffffff, radius: 0.3 },
+                'He': { mass: 4.003, charge: 0, color: 0xffc0cb, radius: 0.25 },
+                'C': { mass: 12.011, charge: 0, color: 0x404040, radius: 0.7 },
+                'N': { mass: 14.007, charge: 0, color: 0x0000ff, radius: 0.65 },
+                'O': { mass: 15.999, charge: 0, color: 0xff0000, radius: 0.6 },
+                'Si': { mass: 28.086, charge: 0, color: 0x8b8989, radius: 1.1 },
+                'Fe': { mass: 55.845, charge: 0, color: 0xb87333, radius: 1.4 },
+                'Mg': { mass: 24.305, charge: 0, color: 0x00ff00, radius: 1.5 },
+                'Al': { mass: 26.982, charge: 0, color: 0xc0c0c0, radius: 1.4 },
+                'Ca': { mass: 40.078, charge: 0, color: 0xffff00, radius: 1.8 }
+            };
+
+            const props = elements[element] || elements['H'];
+            this.mass = props.mass * 1.66e-27; // kg
+            this.charge = props.charge;
+            this.radius = props.radius;
+            this.color = props.color;
+
+            // Bonds to other atoms
+            this.bonds = [];
+            this.bonded = false;
+
+            // Create visual
+            const geometry = new THREE.SphereGeometry(this.radius, 8, 8);
+            const material = new THREE.MeshPhongMaterial({
+                color: this.color,
+                emissive: this.color,
+                emissiveIntensity: 0.3
+            });
+            this.mesh = new THREE.Mesh(geometry, material);
+            this.mesh.position.copy(this.position);
+        }
+
+        applyForce(force) {
+            // F = ma, so a = F/m
+            this.acceleration.add(force.clone().divideScalar(this.mass));
+        }
+
+        update(deltaTime) {
+            // Update velocity
+            this.velocity.add(this.acceleration.clone().multiplyScalar(deltaTime));
+
+            // Update position
+            this.position.add(this.velocity.clone().multiplyScalar(deltaTime));
+
+            // Reset acceleration
+            this.acceleration.set(0, 0, 0);
+
+            // Update mesh
+            this.mesh.position.copy(this.position);
+        }
+    }
+
+    function spawnAtomCloud(count, radius, composition = null) {
+        // Default composition (roughly Earth's crust)
+        if (!composition) {
+            composition = {
+                'O': 0.46,  // Oxygen
+                'Si': 0.28, // Silicon
+                'Al': 0.08, // Aluminum
+                'Fe': 0.05, // Iron
+                'Ca': 0.04, // Calcium
+                'Mg': 0.03, // Magnesium
+                'H': 0.04,  // Hydrogen
+                'He': 0.02  // Helium
+            };
+        }
+
+        const elements = Object.keys(composition);
+        const weights = Object.values(composition);
+
+        for (let i = 0; i < count; i++) {
+            // Random position in sphere
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            const r = Math.cbrt(Math.random()) * radius;
+
+            const x = r * Math.sin(phi) * Math.cos(theta);
+            const y = r * Math.sin(phi) * Math.sin(theta);
+            const z = r * Math.cos(phi);
+
+            // Pick element based on composition
+            const rand = Math.random();
+            let cumulative = 0;
+            let element = 'H';
+            for (let j = 0; j < elements.length; j++) {
+                cumulative += weights[j];
+                if (rand <= cumulative) {
+                    element = elements[j];
+                    break;
+                }
+            }
+
+            const atom = new Atom(x, y, z, element);
+            PHYSICS.particles.push(atom);
+            scene.add(atom.mesh);
+        }
+
+        notify(`🔬 ${count} atoms spawned!`);
+    }
+
+    function updatePhysics(deltaTime) {
+        if (!PHYSICS.enabled) return;
+
+        const dt = deltaTime * PHYSICS.timeScale;
+        const particles = PHYSICS.particles;
+
+        // Apply forces between all particles
+        for (let i = 0; i < particles.length; i++) {
+            const p1 = particles[i];
+
+            for (let j = i + 1; j < particles.length; j++) {
+                const p2 = particles[j];
+
+                const delta = p2.position.clone().sub(p1.position);
+                const distance = delta.length();
+
+                if (distance < 0.1) continue; // Avoid division by zero
+
+                // GRAVITATIONAL FORCE: F = G * m1 * m2 / r²
+                const forceMag = PHYSICS.G * p1.mass * p2.mass / (distance * distance);
+                const forceDir = delta.normalize();
+                const gravForce = forceDir.clone().multiplyScalar(forceMag);
+
+                p1.applyForce(gravForce);
+                p2.applyForce(gravForce.clone().negate());
+
+                // CHEMICAL BONDING (simplified - atoms bond if close enough)
+                if (distance < (p1.radius + p2.radius) * 2 && !p1.bonded && !p2.bonded) {
+                    p1.bonds.push(p2);
+                    p2.bonds.push(p1);
+                    p1.bonded = true;
+                    p2.bonded = true;
+
+                    // Create bond visual
+                    const bondGeometry = new THREE.CylinderGeometry(0.1, 0.1, distance, 4);
+                    const bondMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, opacity: 0.5, transparent: true });
+                    const bond = new THREE.Mesh(bondGeometry, bondMaterial);
+                    bond.position.copy(p1.position.clone().add(delta.clone().multiplyScalar(0.5)));
+                    bond.lookAt(p2.position);
+                    bond.rotateX(Math.PI / 2);
+                    scene.add(bond);
+                }
+            }
+        }
+
+        // Update all particles
+        for (const particle of particles) {
+            particle.update(dt);
+
+            // Contain within sphere (simple boundary)
+            const distFromCenter = particle.position.length();
+            if (distFromCenter > 300) {
+                particle.position.normalize().multiplyScalar(300);
+                particle.velocity.reflect(particle.position.clone().normalize());
+            }
+        }
+    }
 
     // ==================== THREE.JS ====================
     let scene, camera, renderer;
@@ -1822,7 +2005,20 @@
         document.getElementById('btnSnow').addEventListener('click', () => setWeather(weatherState === 'snow' ? 'clear' : 'snow'));
         
         document.getElementById('btnSpeed').addEventListener('click', function() {
-            GAME.speed = GAME.speed === 1 ? 3 : 1;
+        
+        document.getElementById('btnPhysics').addEventListener('click', function() {
+            PHYSICS.enabled = !PHYSICS.enabled;
+            this.classList.toggle('active', PHYSICS.enabled);
+            notify(PHYSICS.enabled ? '⚛️ Physics simulation ENABLED' : '⚛️ Physics simulation PAUSED');
+        });
+        
+        document.getElementById('btnSpawnAtoms').addEventListener('click', function() {
+            if (PHYSICS.particles.length > PHYSICS.particleLimit) {
+                notify('⚠️ Particle limit reached!', 'warning');
+                return;
+            }
+            spawnAtomCloud(10000, 200);
+        });            GAME.speed = GAME.speed === 1 ? 3 : 1;
             this.classList.toggle('active', GAME.speed > 1);
         });
     }
@@ -1854,6 +2050,9 @@
         }
 
         updateTime();
+
+        // Update physics simulation
+        updatePhysics(0.016);
 
         // Trees sway
         trees.forEach(t => {
