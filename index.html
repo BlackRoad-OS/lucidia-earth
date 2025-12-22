@@ -722,12 +722,12 @@
         waterLevel: 0
     };
 
-    // Initialize terrain data structure
+    // Initialize terrain data structure (will be sized dynamically)
     let terrainData = {
         heights: [],
         biomes: [],
-        width: TERRAIN.segments + 1,
-        height: TERRAIN.segments + 1
+        width: 257, // 256 + 1
+        height: 257
     };
 
     function init() {
@@ -807,11 +807,11 @@
     }
 
     function generateTerrain() {
-        const { segments } = TERRAIN;
         const EARTH_RADIUS = 150; // Base radius for Earth sphere
         const MAX_ELEVATION = 2; // Max elevation change (realistic Earth proportions)
+        const SPHERE_RESOLUTION = 256; // 256x256 = 65,536 vertices = ~529k triangles!
 
-        const geo = new THREE.SphereGeometry(EARTH_RADIUS, segments, segments);
+        const geo = new THREE.SphereGeometry(EARTH_RADIUS, SPHERE_RESOLUTION, SPHERE_RESOLUTION);
         const pos = geo.attributes.position.array;
         const colors = new Float32Array(pos.length);
         
@@ -848,8 +848,8 @@
 
             // Store height for this vertex
             const idx = i / 3;
-            const row = Math.floor(idx / (segments + 1));
-            const col = idx % (segments + 1);
+            const row = Math.floor(idx / (SPHERE_RESOLUTION + 1));
+            const col = idx % (SPHERE_RESOLUTION + 1);
             if (!terrainData.heights[row]) terrainData.heights[row] = [];
             if (!terrainData.biomes[row]) terrainData.biomes[row] = [];
 
@@ -922,9 +922,9 @@
     }
 
     function createWater() {
-        // Spherical ocean layer
+        // Spherical ocean layer (high-res for smooth appearance)
         const EARTH_RADIUS = 150;
-        const waterGeo = new THREE.SphereGeometry(EARTH_RADIUS * 0.998, 64, 64); // Slightly smaller than terrain
+        const waterGeo = new THREE.SphereGeometry(EARTH_RADIUS * 0.998, 128, 128); // Slightly smaller than terrain
         const waterMat = new THREE.MeshStandardMaterial({
             color: 0x1a5fb4,
             transparent: true,
